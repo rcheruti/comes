@@ -1,0 +1,12 @@
+/.github/
+/node_modules/
+/coverage/
+/src/
+/test/
+.gitignore
+.npmignore
+.npmrc
+package-lock.json
+tsconfig.json
+vitest.config.ts
+*.tgz
