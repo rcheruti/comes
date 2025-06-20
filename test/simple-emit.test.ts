@@ -1,9 +1,23 @@
 import { test, vi } from 'vitest';
-import { es } from '../src/index';
+import { EventSystem, es as defaultES } from '../src/index';
+
+// ------------------------------------------
+
+test(`Test default EventSystem`, async({ expect }) => {
+  const ES_EVENT_NAME = 'ES_EVENT_NAME_01';
+  defaultES.emit(ES_EVENT_NAME, 'my value');
+  const resp = defaultES.get(ES_EVENT_NAME);
+  expect(resp.last).toBe('my value');
+  expect(resp.date).toBeDefined();
+  expect(resp.listeners.length).toBeGreaterThan(-1);
+  expect(resp.loader).toBeUndefined();
+  expect(resp.loaderProm).toBeUndefined();
+});
 
 // ------------------------------------------
 
 test(`Test simple emit and get`, async({ expect }) => {
+  const es = new EventSystem();
   const ES_EVENT_NAME = 'ES_EVENT_NAME_01';
   es.emit(ES_EVENT_NAME, 'my value');
   const resp = es.get(ES_EVENT_NAME);
@@ -15,6 +29,7 @@ test(`Test simple emit and get`, async({ expect }) => {
 });
 
 test(`Test simple emit before and listen after`, async({ expect }) => {
+  const es = new EventSystem();
   const ES_EVENT_NAME = 'ES_EVENT_NAME_02';
   const Obj = {
     prom: null as null | Promise<any>,
@@ -39,6 +54,7 @@ test(`Test simple emit before and listen after`, async({ expect }) => {
 });
 
 test(`Test simple listen before and emit after`, async({ expect }) => {
+  const es = new EventSystem();
   const ES_EVENT_NAME = 'ES_EVENT_NAME_03';
   const Obj = {
     prom: null as null | Promise<any>,
@@ -63,6 +79,7 @@ test(`Test simple listen before and emit after`, async({ expect }) => {
 });
 
 test(`Test simple unregister`, async({ expect }) => {
+  const es = new EventSystem();
   const ES_EVENT_NAME = 'ES_EVENT_NAME_04';
   const unregister = es.listen(ES_EVENT_NAME, () => {});
   let data = es.get(ES_EVENT_NAME);
@@ -72,6 +89,7 @@ test(`Test simple unregister`, async({ expect }) => {
 });
 
 test(`Test unregister inside listener`, async({ expect }) => {
+  const es = new EventSystem();
   const ES_EVENT_NAME = 'ES_EVENT_NAME_05';
   es.emit(ES_EVENT_NAME, 'my value');
   const Obj = {
@@ -92,6 +110,7 @@ test(`Test unregister inside listener`, async({ expect }) => {
 // Loader behavior
 
 test(`Test loader before listeners`, async({ expect }) => {
+  const es = new EventSystem();
   const ES_EVENT_NAME = 'ES_EVENT_NAME_LOADER_01';
   const Obj = {
     loader: (id: string, ...args: any[]) => {
@@ -105,12 +124,12 @@ test(`Test loader before listeners`, async({ expect }) => {
 
   es.listen(ES_EVENT_NAME, (value: string) => {
     expect(value).toBe('first value');
+    expect(funcSpy).toBeCalled();
   });
-
-  expect(funcSpy).toBeCalled();
 });
 
 test(`Test loader after listeners`, async({ expect }) => {
+  const es = new EventSystem();
   const ES_EVENT_NAME = 'ES_EVENT_NAME_LOADER_02';
   const Obj = {
     loader: (id: string, ...args: any[]) => {
@@ -135,6 +154,7 @@ test(`Test loader after listeners`, async({ expect }) => {
 });
 
 test(`Test loader after value and before listeners`, async({ expect }) => {
+  const es = new EventSystem();
   const ES_EVENT_NAME = 'ES_EVENT_NAME_LOADER_03';
   const Obj = {
     loader: (id: string, ...args: any[]) => {
@@ -162,6 +182,7 @@ test(`Test loader after value and before listeners`, async({ expect }) => {
 });
 
 test(`Test loader after value and after listeners`, async({ expect }) => {
+  const es = new EventSystem();
   const ES_EVENT_NAME = 'ES_EVENT_NAME_LOADER_04';
   const Obj = {
     loader: (id: string, ...args: any[]) => {
@@ -187,6 +208,7 @@ test(`Test loader after value and after listeners`, async({ expect }) => {
 });
 
 test(`Test load without loader`, async({ expect }) => {
+  const es = new EventSystem();
   const ES_EVENT_NAME = 'ES_EVENT_NAME_LOADER_05';
   const Obj = {
     loader: (id: string, ...args: any[]) => {
@@ -194,8 +216,145 @@ test(`Test load without loader`, async({ expect }) => {
     }
   };
   const funcSpy = vi.spyOn(Obj, 'loader');
-
+  // no "setLoader" called
   await es.load(ES_EVENT_NAME);
   expect(funcSpy).not.toBeCalled();
 });
 
+test(`Test loader parameters`, async({ expect }) => {
+  const es = new EventSystem();
+  const ES_EVENT_NAME = 'ES_EVENT_NAME_LOADER_06';
+  const Obj = {
+    loader: (id: string, stringArg: string, trueArg: boolean, falseArg: boolean, numberArg: number) => {
+      expect(id).toBe(ES_EVENT_NAME);
+      expect(stringArg).toBe('value 01');
+      expect(trueArg).toBeTruthy();
+      expect(falseArg).toBeFalsy();
+      expect(numberArg).toBe(15);
+    }
+  };
+  es.setLoader(ES_EVENT_NAME, Obj.loader);
+  await es.load(ES_EVENT_NAME, 'value 01', true, false, 15);
+});
+
+test(`Test loader with error, returning a value`, async({ expect }) => {
+  const es = new EventSystem();
+  const ES_EVENT_NAME = 'ES_EVENT_NAME_LOADER_07';
+  const Obj = {
+    loader: (id: string) => {
+      expect(id).toBe(ES_EVENT_NAME);
+      throw 'loader error';
+    },
+    loaderCatch: async(id: string, ex: any) => {
+      expect(id).toBe(ES_EVENT_NAME);
+      expect(ex).toBe('loader error');
+      return 'default value';
+    },
+    listener: (value: string) => {
+      expect(value).toBe('default value');
+    }
+  };
+  const loaderSpy = vi.spyOn(Obj, 'loader');
+  const loaderCatchSpy = vi.spyOn(Obj, 'loaderCatch');
+  const listenerSpy = vi.spyOn(Obj, 'listener');
+  es.setLoader(ES_EVENT_NAME, Obj.loader, Obj.loaderCatch);
+  es.listen(ES_EVENT_NAME, Obj.listener);
+
+  await es.get(ES_EVENT_NAME).loaderProm;
+  expect(loaderSpy).toBeCalled();
+  expect(loaderCatchSpy).toBeCalled();
+  expect(listenerSpy).toBeCalled();
+});
+
+test(`Test loader with error, throwing an error`, async({ expect }) => {
+  const es = new EventSystem();
+  const ES_EVENT_NAME = 'ES_EVENT_NAME_LOADER_08';
+  const Obj = {
+    loader: (id: string) => {
+      expect(id).toBe(ES_EVENT_NAME);
+      throw new Error('loader error');
+    },
+    loaderCatch: async(id: string, ex: any) => {
+      expect(id).toBe(ES_EVENT_NAME);
+      expect(ex.message).toBe('loader error');
+      throw new Error('loaderCatch error');
+    },
+    listener: (value: string) => {
+      // cannot be called
+    }
+  };
+  const loaderSpy = vi.spyOn(Obj, 'loader');
+  const loaderCatchSpy = vi.spyOn(Obj, 'loaderCatch');
+  const listenerSpy = vi.spyOn(Obj, 'listener');
+  es.setLoaderCatch(ES_EVENT_NAME, Obj.loaderCatch);
+  es.setLoader(ES_EVENT_NAME, Obj.loader);
+  es.listen(ES_EVENT_NAME, Obj.listener);
+  try {
+    await es.get(ES_EVENT_NAME).loaderProm;
+  } catch(ex: any) {
+    expect(ex.message).toBe('loaderCatch error');
+    expect(ex.loaderEx.message).toBe('loader error');
+    expect(loaderSpy).toBeCalled();
+    expect(loaderCatchSpy).toBeCalled();
+    expect(listenerSpy).not.toBeCalled();
+  }
+});
+
+test(`Test loader with error, without a loaderCatch`, async({ expect }) => {
+  const es = new EventSystem();
+  const ES_EVENT_NAME = 'ES_EVENT_NAME_LOADER_09';
+  const Obj = {
+    loader: (id: string) => {
+      expect(id).toBe(ES_EVENT_NAME);
+      throw new Error('loader error');
+    },
+    listener: (value: string) => {
+      // cannot be called
+    }
+  };
+  const loaderSpy = vi.spyOn(Obj, 'loader');
+  const listenerSpy = vi.spyOn(Obj, 'listener');
+  es.setLoader(ES_EVENT_NAME, Obj.loader);
+  es.listen(ES_EVENT_NAME, Obj.listener);
+  try {
+    await es.get(ES_EVENT_NAME).loaderProm;
+  } catch(ex: any) {
+    expect(ex.message).toBe('loader error');
+    expect(loaderSpy).toBeCalled();
+    expect(listenerSpy).not.toBeCalled();
+  }
+});
+
+test(`Test loader with error, loaderCatch with error, throwing string (native data)`, async({ expect }) => {
+  const es = new EventSystem();
+  const ES_EVENT_NAME = 'ES_EVENT_NAME_LOADER_07';
+  const Obj = {
+    loader: (id: string) => {
+      expect(id).toBe(ES_EVENT_NAME);
+      throw 'loader error';
+    },
+    loaderCatch: async(id: string, ex: any) => {
+      expect(id).toBe(ES_EVENT_NAME);
+      expect(ex).toBe('loader error');
+      throw 'loaderCatch error';
+    },
+    listener: (value: string) => {
+      // cannot be called
+    }
+  };
+  const loaderSpy = vi.spyOn(Obj, 'loader');
+  const loaderCatchSpy = vi.spyOn(Obj, 'loaderCatch');
+  const listenerSpy = vi.spyOn(Obj, 'listener');
+  es.setLoader(ES_EVENT_NAME, Obj.loader, Obj.loaderCatch);
+  es.listen(ES_EVENT_NAME, Obj.listener);
+
+  try {
+    await es.get(ES_EVENT_NAME).loaderProm;
+  } catch(ex: any) {
+    expect(ex).toBe('loaderCatch error');
+    expect(ex.loaderEx).toBeUndefined();
+    expect(loaderSpy).toBeCalled();
+    expect(loaderCatchSpy).toBeCalled();
+    expect(listenerSpy).not.toBeCalled();
+  }
+});
