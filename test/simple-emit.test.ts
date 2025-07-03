@@ -5,7 +5,7 @@ import { EventSystem, es as defaultES } from '../src/index';
 
 test(`Test default EventSystem`, async({ expect }) => {
   const ES_EVENT_NAME = 'ES_EVENT_NAME_01';
-  defaultES.emit(ES_EVENT_NAME, 'my value');
+  defaultES.send(ES_EVENT_NAME, 'my value');
   const resp = defaultES.get(ES_EVENT_NAME);
   expect(resp.last).toBe('my value');
   expect(resp.date).toBeDefined();
@@ -19,7 +19,7 @@ test(`Test default EventSystem`, async({ expect }) => {
 test(`Test simple emit and get`, async({ expect }) => {
   const es = new EventSystem();
   const ES_EVENT_NAME = 'ES_EVENT_NAME_01';
-  es.emit(ES_EVENT_NAME, 'my value');
+  es.send(ES_EVENT_NAME, 'my value');
   const resp = es.get(ES_EVENT_NAME);
   expect(resp.last).toBe('my value');
   expect(resp.date).toBeDefined();
@@ -41,8 +41,8 @@ test(`Test simple emit before and listen after`, async({ expect }) => {
   };
   const funcSpy = vi.spyOn(Obj, 'func');
 
-  es.emit(ES_EVENT_NAME, 'my value 01');
-  es.emit(ES_EVENT_NAME, 'my value 02');
+  es.send(ES_EVENT_NAME, 'my value 01');
+  es.send(ES_EVENT_NAME, 'my value 02');
 
   Obj.prom = new Promise<any>((res,_) => {
     Obj.res = res;
@@ -71,8 +71,8 @@ test(`Test simple listen before and emit after`, async({ expect }) => {
     es.listen(ES_EVENT_NAME, Obj.func);
   });
 
-  es.emit(ES_EVENT_NAME, 'my value 01');
-  es.emit(ES_EVENT_NAME, 'my value 02');
+  es.send(ES_EVENT_NAME, 'my value 01');
+  es.send(ES_EVENT_NAME, 'my value 02');
   await Obj.prom;
 
   expect(funcSpy).toBeCalledTimes(2);
@@ -91,7 +91,7 @@ test(`Test simple unregister`, async({ expect }) => {
 test(`Test unregister inside listener`, async({ expect }) => {
   const es = new EventSystem();
   const ES_EVENT_NAME = 'ES_EVENT_NAME_05';
-  es.emit(ES_EVENT_NAME, 'my value');
+  es.send(ES_EVENT_NAME, 'my value');
   const Obj = {
     listener: () => {
       es.unlisten(ES_EVENT_NAME, Obj.listener);
@@ -102,8 +102,51 @@ test(`Test unregister inside listener`, async({ expect }) => {
   expect(funcSpy).toBeCalledTimes(1);
   
   expect(es.get(ES_EVENT_NAME).listeners.length).toBe(0); // removed
-  es.emit(ES_EVENT_NAME, 'my value 02');
+  es.send(ES_EVENT_NAME, 'my value 02');
   expect(funcSpy).toBeCalledTimes(1); // was removed, so not called any more
+});
+
+test(`Test listener thrown exception (awaited)`, async({ expect }) => {
+  const es = new EventSystem();
+  const ES_EVENT_NAME = 'ES_EVENT_NAME_06';
+  const Obj = {
+    listen01: async(event: number) => {
+      throw 'Error'
+    },
+  };
+  const listen01Spy = vi.spyOn(Obj, 'listen01');
+  es.listen(ES_EVENT_NAME, Obj.listen01);
+
+  try {
+    await es.send(ES_EVENT_NAME, 1);
+  } catch(err: any) {
+    expect(err).toBe('Error');
+
+    let resp = es.get(ES_EVENT_NAME);
+    expect(resp.last).toBe(1);
+    
+    expect(listen01Spy).toBeCalled();
+  }
+});
+
+test(`Test listener thrown exception (not awaited)`, async({ expect }) => {
+  const es = new EventSystem();
+  const ES_EVENT_NAME = 'ES_EVENT_NAME_07';
+  const Obj = {
+    listen01: async(event: number) => {
+      throw 'Listener Error'
+    },
+  };
+  const listen01Spy = vi.spyOn(Obj, 'listen01');
+  es.listen(ES_EVENT_NAME, Obj.listen01);
+
+  let prom: any = null;
+  expect(() => prom = es.send(ES_EVENT_NAME, 1)).not.toThrow();
+  try {
+    await prom;
+  } catch(err: any) {
+    expect(err).toBe('Listener Error');
+  }
 });
 
 // ------------------------------------------
@@ -114,7 +157,7 @@ test(`Test loader before listeners`, async({ expect }) => {
   const ES_EVENT_NAME = 'ES_EVENT_NAME_LOADER_01';
   const Obj = {
     loader: (id: string, ...args: any[]) => {
-      es.emit(ES_EVENT_NAME, 'first value');
+      es.send(ES_EVENT_NAME, 'first value');
     }
   };
   const funcSpy = vi.spyOn(Obj, 'loader');
@@ -133,7 +176,7 @@ test(`Test loader after listeners`, async({ expect }) => {
   const ES_EVENT_NAME = 'ES_EVENT_NAME_LOADER_02';
   const Obj = {
     loader: (id: string, ...args: any[]) => {
-      es.emit(ES_EVENT_NAME, 'first value');
+      es.send(ES_EVENT_NAME, 'first value');
     }
   };
   const funcSpy = vi.spyOn(Obj, 'loader');
@@ -158,12 +201,12 @@ test(`Test loader after value and before listeners`, async({ expect }) => {
   const ES_EVENT_NAME = 'ES_EVENT_NAME_LOADER_03';
   const Obj = {
     loader: (id: string, ...args: any[]) => {
-      es.emit(ES_EVENT_NAME, 'first value');
+      es.send(ES_EVENT_NAME, 'first value');
     }
   };
   const funcSpy = vi.spyOn(Obj, 'loader');
 
-  es.emit(ES_EVENT_NAME, 'other value');
+  es.send(ES_EVENT_NAME, 'other value');
 
   es.setLoader(ES_EVENT_NAME, Obj.loader);
   expect(funcSpy).not.toBeCalled();
@@ -186,12 +229,12 @@ test(`Test loader after value and after listeners`, async({ expect }) => {
   const ES_EVENT_NAME = 'ES_EVENT_NAME_LOADER_04';
   const Obj = {
     loader: (id: string, ...args: any[]) => {
-      es.emit(ES_EVENT_NAME, 'first value');
+      es.send(ES_EVENT_NAME, 'first value');
     }
   };
   const funcSpy = vi.spyOn(Obj, 'loader');
 
-  es.emit(ES_EVENT_NAME, 'other value');
+  es.send(ES_EVENT_NAME, 'other value');
   es.listen(ES_EVENT_NAME, (value: string) => {
     expect(value).toBe('other value');
   });
@@ -212,7 +255,7 @@ test(`Test load without loader`, async({ expect }) => {
   const ES_EVENT_NAME = 'ES_EVENT_NAME_LOADER_05';
   const Obj = {
     loader: (id: string, ...args: any[]) => {
-      es.emit(ES_EVENT_NAME, 'first value');
+      es.send(ES_EVENT_NAME, 'first value');
     }
   };
   const funcSpy = vi.spyOn(Obj, 'loader');
@@ -358,3 +401,134 @@ test(`Test loader with error, loaderCatch with error, throwing string (native da
     expect(listenerSpy).not.toBeCalled();
   }
 });
+
+// ------------------------------------------
+// ------------------------------------------
+// ----- Interceptors
+
+test(`Test simple interceptor`, async({ expect }) => {
+  const es = new EventSystem();
+  const ES_EVENT_NAME = 'ES_EVENT_INTER_01';
+  es.addInter(ES_EVENT_NAME, async(id: string, event: string, es: EventSystem) => {
+    expect(id).toBe(ES_EVENT_NAME);
+    expect(event).toBe('my value');
+    return event + '_2';
+  });
+  await es.send(ES_EVENT_NAME, 'my value');
+  const resp = es.get(ES_EVENT_NAME);
+  expect(resp.last).toBe('my value_2'); // changed by interceptor
+  expect(resp.date).toBeDefined();
+  expect(resp.listeners.length).toBeGreaterThan(-1);
+  expect(resp.loader).toBeUndefined();
+  expect(resp.loaderProm).toBeUndefined();
+});
+
+test(`Test simple interceptor chain`, async({ expect }) => {
+  const es = new EventSystem();
+  const ES_EVENT_NAME = 'ES_EVENT_INTER_02';
+  const Obj = {
+    inter01: async(id: string, event: number, es: EventSystem) => {
+      expect(id).toBe(ES_EVENT_NAME);
+      expect(event).toBe(1);
+      return event + 1;
+    },
+    inter02: async(id: string, event: number, es: EventSystem) => {
+      expect(id).toBe(ES_EVENT_NAME);
+      expect(event).toBe(2);
+      return event + 1;
+    },
+    listen01: async(event: number) => {
+      expect(event).toBe(3);
+    },
+  };
+  const inter01Spy = vi.spyOn(Obj, 'inter01');
+  const inter02Spy = vi.spyOn(Obj, 'inter02');
+  const listen01Spy = vi.spyOn(Obj, 'listen01');
+
+  es.addInter(ES_EVENT_NAME, Obj.inter01);
+  es.addInter(ES_EVENT_NAME, Obj.inter02);
+  es.listen(ES_EVENT_NAME, Obj.listen01);
+
+  await es.send(ES_EVENT_NAME, 1);
+  const resp = es.get(ES_EVENT_NAME);
+  expect(resp.last).toBe(3); // changed by interceptors
+  expect(resp.date).toBeDefined();
+  expect(resp.listeners.length).toBeGreaterThan(-1);
+  expect(resp.loader).toBeUndefined();
+  expect(resp.loaderProm).toBeUndefined();
+  
+  expect(inter01Spy).toBeCalledTimes(1);
+  expect(inter02Spy).toBeCalledTimes(1);
+  expect(listen01Spy).toBeCalledTimes(1);
+});
+
+test(`Test simple interceptor remove`, async({ expect }) => {
+  const es = new EventSystem();
+  const ES_EVENT_NAME = 'ES_EVENT_INTER_03';
+  const Obj = {
+    inter01: async(id: string, event: number, es: EventSystem) => {
+      expect(id).toBe(ES_EVENT_NAME);
+      expect(event).toBe(1);
+      return event + 1;
+    },
+    inter02: async(id: string, event: number, es: EventSystem) => {
+      expect(id).toBe(ES_EVENT_NAME);
+      expect(event).toBe(2);
+      return event + 1;
+    },
+    listen01: async(event: number) => {
+      return event +1;
+    },
+  };
+  const inter01Spy = vi.spyOn(Obj, 'inter01');
+  const inter02Spy = vi.spyOn(Obj, 'inter02');
+  const listen01Spy = vi.spyOn(Obj, 'listen01');
+
+  es.addInter(ES_EVENT_NAME, Obj.inter01);
+  const removeInter02 = es.addInter(ES_EVENT_NAME, Obj.inter02);
+  es.listen(ES_EVENT_NAME, Obj.listen01);
+
+  await es.send(ES_EVENT_NAME, 1);
+  let resp = es.get(ES_EVENT_NAME);
+  expect(resp.last).toBe(3); // changed by interceptors
+
+  removeInter02();
+  await es.send(ES_EVENT_NAME, 1);
+  resp = es.get(ES_EVENT_NAME);
+  expect(resp.last).toBe(2); // changed by interceptors
+  
+  expect(inter01Spy).toBeCalledTimes(2);
+  expect(inter02Spy).toBeCalledTimes(1);
+  expect(listen01Spy).toBeCalledTimes(2);
+});
+
+test(`Test simple interceptor error`, async({ expect }) => {
+  const es = new EventSystem();
+  const ES_EVENT_NAME = 'ES_EVENT_INTER_04';
+  const Obj = {
+    inter01: async(id: string, event: number, es: EventSystem) => {
+      throw 'Error';
+    },
+    listen01: async(event: number) => {
+      return event +1;
+    },
+  };
+  const inter01Spy = vi.spyOn(Obj, 'inter01');
+  const listen01Spy = vi.spyOn(Obj, 'listen01');
+
+  es.addInter(ES_EVENT_NAME, Obj.inter01);
+  es.listen(ES_EVENT_NAME, Obj.listen01);
+
+  try {
+    await es.send(ES_EVENT_NAME, 1);
+  } catch(err: any) {
+    expect(err).toBe('Error');
+
+    let resp = es.get(ES_EVENT_NAME);
+    expect(resp.last).toBe(null); // not changed by interceptors
+    
+    expect(inter01Spy).toBeCalledTimes(1);
+    expect(listen01Spy).not.toBeCalled();
+  }
+});
+

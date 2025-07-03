@@ -5,7 +5,7 @@
  * @param item Item that will be removed
  * @param list Array where to find the item
  */
-export function deleteFromArray( item: any, list: any[] ) {
+function deleteFromArray( item: any, list: any[] ) {
   for( let i = list.length; i > -1; i-- ) {
     let it = list[i];
     if( it === item ) {
@@ -18,6 +18,9 @@ export function deleteFromArray( item: any, list: any[] ) {
 // -------
 // Event System
 
+export type EventListenerType<T = any> = (event: T) => void ;
+export type EventInterceptorType<T = any> = (id: string, event: T, es: EventSystem) => T ;
+
 /**
  * Type that holds the value for an event address.
  */
@@ -29,7 +32,7 @@ export type ES_ValueType = {
   /**
    * Listeners of this event.
    */
-  listeners: ((event: any) => void)[] ,
+  listeners: EventListenerType[] ,
   /**
    * Last time an event was emitted.  
    * 
@@ -89,6 +92,18 @@ export class EventSystem {
   data: { [id: string]: ES_ValueType } = {};
 
   /**
+   * Interceptors to transform data.  
+   * Interceptors are called in the installation order.  
+   * The special empty string event address will be called for all events sent.  
+   * 
+   * The interceptors exists to transform, monitor, prepare or validate (or many other uses)
+   * the event sent to an address. The sequence of interceptors will be called like a 
+   * "chain of responsibility" pattern, if any exception is thrown the following interceptors 
+   * will not be executed, and the listeners not called.  
+   */
+  inters: { [id: string]: EventInterceptorType[] } = {};
+
+  /**
    * Gets a reference to {@link ES_ValueType} of the address informed.
    * @param id The address name of the event
    */
@@ -100,14 +115,31 @@ export class EventSystem {
    * Sends the value to the listeners of the event address.
    * @param id The address name of the event
    * @param event The value to send to listeners
-   * @returns The value informed
    */
-  emit<T>(id: string, event: T): T {
+  async send<T>(id: string, event: T) {
+    let inters = [ ...(this.inters['']||[]), ...(this.inters[id]||[]) ];
+    let newValue = event;
+    try {
+      for(let inte of inters) {
+        newValue = await inte(id, newValue, this);
+      }
+    } catch(err: any) {
+      console.error(`error on interceptor of ${id}`, err);
+      throw err;
+    }
+
     let esData = this.get( id );
-    esData.last = event;
+    esData.last = newValue;
     esData.date = new Date();
-    for(let func of esData.listeners) func( event );
-    return event;
+    for(let func of esData.listeners) {
+      try {
+        await func( newValue );
+      } catch(err: any) {
+        console.error(`Error on listener of ${id}, ${func}`, err);
+        throw err;
+      }
+    }
+    return newValue;
   }
   /**
    * Register a listener for the address.  
@@ -120,7 +152,7 @@ export class EventSystem {
    * @param listener The listener, will be called every time a new value is emitted to this address
    * @returns An unregister function. Use this function to remove the listener
    */
-  listen(id: string, listener: (event: any) => void): ()=>void {
+  listen(id: string, listener: EventListenerType): ()=>void {
     let esData = this.get( id );
     esData.listeners.push( listener );
     if( esData.date ) listener( esData.last );
@@ -146,9 +178,41 @@ export class EventSystem {
    * @param id The address name of the event
    * @param listener Listener to remove
    */
-  unlisten(id: string, listener: (event: any) => void) {
+  unlisten(id: string, listener: EventListenerType) {
     let esData = this.get( id );
     deleteFromArray( listener, esData.listeners );
+  }
+  /**
+   * Add an interceptor to transform data.  
+   * Interceptors are called in the installation order.  
+   * The special empty string event address will be called for all events sent.  
+   * 
+   * The interceptors exists to transform, monitor, prepare or validate (or many other uses)
+   * the event sent to an address. The sequence of interceptors will be called like a 
+   * "chain of responsibility" pattern, if any exception is thrown the following interceptors 
+   * will not be executed, and the listeners not called.  
+   * 
+   * Interceptors will be executed synchronous in the call of the {@link send} method.  
+   * So any exception thrown will be thrown also in the {@link send} call.
+   * 
+   * @param id The address name of the event
+   * @param listener Interceptor to add
+   * @returns An unregister function. Use this function to remove the interceptor
+   */
+  addInter(id: string, listener: EventInterceptorType): ()=>void {
+    if( !this.inters[id] ) this.inters[id] = [];
+    this.inters[id].push(listener);
+    return () => this.removeInter( id, listener );
+  }
+  /**
+   * Remove an interceptor.  
+   * 
+   * @param id The address name of the event
+   * @param listener Interceptor to add
+   * @returns An unregister function. Use this function to remove the interceptor
+   */
+  removeInter(id: string, listener: EventInterceptorType) {
+    deleteFromArray( listener, this.inters[id] );
   }
   /**
    * Configure a {@link ES_ValueType.loader loader} to execute when the first listener is registered and no value exists yet.
@@ -202,7 +266,7 @@ export class EventSystem {
             try {
               const catchRes = await esData.loaderCatch(id, ex);
               if( catchRes !== undefined ) {
-                this.emit(id, catchRes);
+                this.send(id, catchRes);
                 res(catchRes);
               }
             } catch(ex2: any) {
